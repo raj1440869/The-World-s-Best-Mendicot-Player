@@ -159,7 +159,10 @@ def run_game(game, camera_mode=False):
         try:
             from detectcard import CNNCardDetector
             detector = CNNCardDetector()
+            detector.clear_played_cards()   # fresh start for this game
             print("\n  Camera detection enabled.")
+            print("  The camera will scan for played cards automatically each turn.")
+            print("  Point camera at played cards / discard area.")
         except Exception as exc:
             print(f"\n  Camera unavailable ({exc}). Using manual input.")
 
@@ -167,11 +170,14 @@ def run_game(game, camera_mode=False):
     print("  GAME START")
     print("=" * 60)
     print("  Commands during your turn:")
-    print("    advice  – AI recommendation for each card in hand")
+    print("    advice  – full loss-probability breakdown for each card")
     print("    hand    – show your current hand")
     print("    state   – show full game state")
+    print("    scan    – manually trigger a camera scan for played cards")
     print("    <N>     – play card number N from your hand")
     print("    <card>  – play by name, e.g. 'K h' or 'Ace Clubs'")
+    print()
+    print("  The BEST PLAY is shown automatically at the start of each turn.")
     print()
 
     for trick_num in range(1, 14):
@@ -187,6 +193,16 @@ def run_game(game, camera_mode=False):
             print(f"\n  {player.name}'s turn  (Team {player.team})")
             show_hand(player)
 
+            # Auto-scan camera and show the best play at the start of every turn
+            if camera_mode and detector:
+                new_cards = detector.scan_and_accumulate()
+                if new_cards:
+                    print(f"  [camera] Detected {len(new_cards)} newly played card(s).")
+
+            best = game.get_best_move(pidx, detector if camera_mode else None)
+            if best:
+                print(f"\n  >>> BEST PLAY: {best} <<<")
+
             card_played = None
             while card_played is None:
                 raw = input("  > ").strip()
@@ -195,10 +211,11 @@ def run_game(game, camera_mode=False):
                 cmd = raw.lower()
 
                 if cmd == "advice":
-                    advice = game.get_advice(pidx)
-                    print("\n  AI ADVICE:")
+                    advice = game.get_advice(pidx, detector if camera_mode else None)
+                    print("\n  AI ADVICE (loss probability per card):")
                     for line in advice.splitlines():
                         print(f"    {line}")
+                    print(f"\n  >>> BEST PLAY: {best} <<<")
                     continue
 
                 if cmd == "hand":
@@ -207,6 +224,16 @@ def run_game(game, camera_mode=False):
 
                 if cmd == "state":
                     print("\n ", game.state_summary().replace("\n", "\n  "))
+                    continue
+
+                if cmd == "scan" and camera_mode and detector:
+                    found = detector.scan_and_accumulate()
+                    total = len(detector.played_cards_set)
+                    print(f"  [camera] Scan complete. {len(found)} new card(s). "
+                          f"Total seen: {total}.")
+                    # Recompute best move with updated knowledge
+                    best = game.get_best_move(pidx, detector)
+                    print(f"  >>> BEST PLAY: {best} <<<")
                     continue
 
                 if cmd == "camera" and detector:

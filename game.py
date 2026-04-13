@@ -72,16 +72,16 @@ class Game:
     # AI advice
     # ------------------------------------------------------------------
 
-    def get_advice(self, player_index):
+    def get_advice(self, player_index, detector=None):
         """
         Return a string with the loss-probability for each card in hand.
+        Pass a CNNCardDetector to include camera-detected played cards.
         If the player is leading the trick, return a simple overview.
         """
         player = self.players[player_index]
-        remaining = self._unknown_cards(player_index)
+        remaining = self._unknown_cards(player_index, detector)
 
         if not self.original_suite:
-            # Leading the trick — all cards are legal
             lines = [
                 "You lead this trick. Any card is valid.",
                 f"Unknown cards still out: {len(remaining)}",
@@ -96,10 +96,35 @@ class Game:
             cards_remaining=remaining,
         )
 
-    def _unknown_cards(self, for_player_index):
+    def get_best_move(self, player_index, detector=None):
         """
-        Cards that are NOT in the querying player's hand AND NOT yet played.
-        These are the cards that could still be in opponents' hands.
+        Return the single Card that is the mathematically best play.
+        Pass a CNNCardDetector to include camera-detected played cards,
+        giving the AI perfect knowledge of eliminated cards.
+        """
+        player = self.players[player_index]
+        remaining = self._unknown_cards(player_index, detector)
+
+        teammate_winning = False
+        if self.highest_player is not None:
+            my_team = self.players[player_index].team
+            winner_team = self.players[self.highest_player].team
+            teammate_winning = (winner_team == my_team)
+
+        return self.calculations.best_move(
+            original_suite=self.original_suite,
+            mundup=self.mundup,
+            highest_card=self.highest_card,
+            player_hand=player.hand,
+            cards_remaining=remaining,
+            teammate_winning=teammate_winning,
+        )
+
+    def _unknown_cards(self, for_player_index, detector=None):
+        """
+        Cards not in the player's own hand and not yet played.
+        If a CNNCardDetector is supplied its cumulative played_cards_set
+        is also subtracted, using camera vision to refine the unknown set.
         """
         all_cards = {
             (suit, val)
@@ -107,14 +132,18 @@ class Game:
             for val in range(2, 15)
         }
 
-        # Remove this player's own cards
-        own_hand = self.players[for_player_index].hand
-        for card in own_hand:
+        # Remove own hand
+        for card in self.players[for_player_index].hand:
             all_cards.discard((card.getSuit(), card.getValue()))
 
-        # Remove already-played cards
+        # Remove manually tracked played cards
         for card in self.played_cards:
             all_cards.discard((card.getSuit(), card.getValue()))
+
+        # Remove camera-detected played cards (may overlap with above, safe)
+        if detector is not None:
+            for card in detector.get_all_played_cards():
+                all_cards.discard((card.getSuit(), card.getValue()))
 
         return [Card(s, v) for s, v in all_cards]
 

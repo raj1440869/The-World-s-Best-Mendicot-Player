@@ -22,6 +22,8 @@ class CNNCardDetector:
         self.current_card = None
         self.stability_threshold = 5  # Number of consistent frames before accepting new card
         self.consecutive_detections = {}
+        # Cumulative set of all cards ever seen by the camera (for played-card tracking)
+        self.played_cards_set = set()   # {(rank_str, suit_str), ...}
         
         # Card rank and suit mappings
         self.rank_map = {
@@ -327,6 +329,65 @@ class CNNCardDetector:
             cv2.putText(frame, "LAST: (none)", (10, y_offset),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 100, 100), 2)
     
+    # ------------------------------------------------------------------
+    # Played-card tracking (cumulative, camera-driven)
+    # ------------------------------------------------------------------
+
+    def capture_frame(self, camera_index=0):
+        """Grab one frame from the camera. Returns the frame or None."""
+        cap = cv2.VideoCapture(camera_index)
+        if not cap.isOpened():
+            return None
+        ret, frame = cap.read()
+        cap.release()
+        return frame if ret else None
+
+    def scan_and_accumulate(self, camera_index=0):
+        """
+        Capture one frame, detect ALL visible cards in it, and add any
+        newly-seen cards to played_cards_set.
+
+        Returns a list of Card objects that were newly discovered (not
+        seen in previous scans).  Call this before each advice query to
+        refine the set of unknown cards.
+        """
+        frame = self.capture_frame(camera_index)
+        if frame is None:
+            print("  [camera] Could not access camera.")
+            return []
+
+        detected = self._detect_cards_in_frame(frame)
+        newly_found = []
+
+        for info in detected:
+            key = (info['rank'], info['suit'])
+            if key not in self.played_cards_set:
+                self.played_cards_set.add(key)
+                rank = self.rank_map.get(info['rank'], info['rank'])
+                try:
+                    card_obj = Card(info['suit'], rank)
+                    newly_found.append(card_obj)
+                    print(f"  [camera] New played card: {card_obj}")
+                except Exception:
+                    pass
+
+        return newly_found
+
+    def get_all_played_cards(self):
+        """Return all accumulated camera-detected cards as Card objects."""
+        result = []
+        for rank_str, suit in self.played_cards_set:
+            rank = self.rank_map.get(rank_str, rank_str)
+            try:
+                result.append(Card(suit, rank))
+            except Exception:
+                pass
+        return result
+
+    def clear_played_cards(self):
+        """Reset the cumulative played-card set (call at start of new game)."""
+        self.played_cards_set.clear()
+
     def get_current_card(self):
         """Get the most recently detected card as a Card object"""
         if self.current_card:

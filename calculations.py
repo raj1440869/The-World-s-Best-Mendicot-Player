@@ -156,6 +156,73 @@ class Calculations:
         
         return count
     
+    # ------------------------------------------------------------------
+    # Best-move selection
+    # ------------------------------------------------------------------
+
+    def best_move(self, original_suite, mundup, highest_card,
+                  player_hand, cards_remaining, teammate_winning=False):
+        """
+        Return the single Card from player_hand that is the mathematically
+        best play given current game state.
+
+        Strategy (in priority order):
+          1. Leading the trick → lead with an Ace, else highest card of
+             the suit we hold the most of (establish strength).
+          2. Can't beat current highest → play lowest legal card (minimize waste).
+          3. Teammate is currently winning → play lowest legal card (don't steal).
+          4. Can beat → play the LOWEST card that still beats the highest
+             (win as cheaply as possible, preserve big cards).
+        """
+        if not player_hand:
+            return None
+
+        legal = self._legal_cards(original_suite, mundup, player_hand)
+
+        # Leading the trick
+        if not original_suite or highest_card is None:
+            return self._best_lead(legal, cards_remaining, mundup)
+
+        # Cards that can beat the current highest
+        beating = [c for c in legal
+                   if self._beats_highest(c, highest_card, original_suite, mundup)]
+
+        # Can't beat anything → play lowest legal card
+        if not beating:
+            return min(legal, key=lambda c: c.getValue())
+
+        # Teammate winning → don't steal the trick
+        if teammate_winning:
+            return min(legal, key=lambda c: c.getValue())
+
+        # Win cheaply → lowest card that still beats current highest
+        return min(beating, key=lambda c: c.getValue())
+
+    def _legal_cards(self, original_suite, mundup, player_hand):
+        """Return the subset of player_hand that is legal to play."""
+        if not original_suite:
+            return list(player_hand)
+        if self._has_suit(player_hand, original_suite):
+            return [c for c in player_hand if c.getSuit() == original_suite]
+        return list(player_hand)
+
+    def _best_lead(self, hand, cards_remaining, mundup):
+        """Choose best card when leading (no current highest on table)."""
+        from collections import Counter
+
+        # Lead with an Ace if we have one
+        aces = [c for c in hand if c.getValue() == 14]
+        if aces:
+            # Among aces, prefer the one whose suit we hold most of
+            suit_counts = Counter(c.getSuit() for c in hand)
+            return max(aces, key=lambda c: suit_counts[c.getSuit()])
+
+        # Otherwise lead the highest card of our most-held suit
+        suit_counts = Counter(c.getSuit() for c in hand)
+        dominant = max(suit_counts, key=suit_counts.get)
+        return max((c for c in hand if c.getSuit() == dominant),
+                   key=lambda c: c.getValue())
+
     def _same_card(self, card1, card2):
         """Check if two cards are identical."""
         return (card1.getValue() == card2.getValue() and 
