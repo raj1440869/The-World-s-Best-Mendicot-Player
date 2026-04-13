@@ -10,19 +10,18 @@ class Deck:
         self.name_map = {11: "Jack", 12: "Queen", 13: "King", 14: "Ace"}
         
         for suit in suits:
-            for _ in range(2):
-                suit_row = [] 
-                for value in range(2, 15):
-                    new_card = Card(suit, value)
-                    new_card.count = 1 
-                    suit_row.append(new_card)
-                self.cards.append(suit_row)
-        
+            suit_row = []
+            for value in range(2, 15):
+                new_card = Card(suit, value)
+                new_card.count = 1
+                suit_row.append(new_card)
+            self.cards.append(suit_row)
+
         self.suit_map = {
-            "Clubs": [0, 1], 
-            "Diamonds": [2, 3], 
-            "Hearts": [4, 5], 
-            "Spades": [6, 7]
+            "Clubs":    [0],
+            "Diamonds": [1],
+            "Hearts":   [2],
+            "Spades":   [3],
         }
 
     def _get_display_name(self, val):

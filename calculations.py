@@ -6,61 +6,86 @@ class Calculations:
     
     def calculate_loss(self, original_suite, mundup, highest_card, player_hand, cards_remaining):
         """
-        Calculate probability of losing for each card in player's hand.
-        
-        SIMPLIFIED LOGIC:
-        1. If MUNDUP exists → Only mundup cards matter
-        2. If NO MUNDUP:
-           a) You don't have original suite → Setting mundup
-           b) You have original suite → Count original suite > highest
+        For each card in player_hand, report either an ILLEGAL flag or the
+        probability that some remaining card can beat it.
+
+        Legality rules (Mendicot):
+          1. Must follow the led suit if you hold it.
+          2. If you can't follow suit but hold trump, you must play trump.
+          3. Only if you hold neither may you play anything.
+
+        Threat counting:
+          - Playing trump:        only a higher trump beats you.
+          - Playing non-trump:    any trump beats you, PLUS any higher
+                                  card of the same suit (if no trump is played).
+          - Setting trump (first  only higher cards of your chosen suit beat you.
+            off-suit play):
+          - Ties don't beat you (first-played card wins on equal value).
         """
         results = []
-        
+
+        has_original  = self._has_suit(player_hand, original_suite)
+        has_trump     = bool(mundup and self._has_suit(player_hand, mundup))
+        total         = len(cards_remaining)
+
         for card in player_hand:
             card_name = self._format_card_name(card)
-            
-            # Check if card beats current highest
+
+            # ── Legality ────────────────────────────────────────────────
+            if original_suite:
+                if has_original and card.getSuit() != original_suite:
+                    results.append(f"If play {card_name}: ILLEGAL (Must follow suit)")
+                    continue
+                if not has_original and has_trump and card.getSuit() != mundup:
+                    results.append(f"If play {card_name}: ILLEGAL (Must play trump)")
+                    continue
+
+            # ── Can't beat current highest → certain loss ────────────────
             if highest_card and not self._beats_highest(card, highest_card, original_suite, mundup):
                 results.append(f"If play {card_name}: 100.0% chance of losing (Can't beat current highest)")
                 continue
-            
-            # Count cards that can beat yours
+
+            # ── Count remaining cards that would beat this card ──────────
             beating_count = 0
-            total = len(cards_remaining)
-            
-            # CASE 1: MUNDUP EXISTS
+
             if mundup:
                 if card.getSuit() == mundup:
-                    # Count mundup cards >= your value
-                    beating_count = sum(1 for c in cards_remaining 
-                                      if c.getSuit() == mundup and c.getValue() >= card.getValue())
+                    # Only a higher trump beats you
+                    beating_count = sum(
+                        1 for c in cards_remaining
+                        if c.getSuit() == mundup and c.getValue() > card.getValue()
+                    )
                 else:
-                    # Playing non-mundup when mundup exists
-                    # All mundup cards beat you
+                    # Any trump beats you; AND a higher same-suit card beats you
+                    # (if every opponent plays same suit and no one plays trump)
                     beating_count = sum(1 for c in cards_remaining if c.getSuit() == mundup)
-            
-            # CASE 2: NO MUNDUP
+                    beating_count += sum(
+                        1 for c in cards_remaining
+                        if c.getSuit() == card.getSuit() and c.getValue() > card.getValue()
+                    )
             else:
-                # Sub-case: You're SETTING mundup (don't have original suite)
-                if not self._has_suit(player_hand, original_suite):
-                    suit = card.getSuit()
-                    beating_count = sum(1 for c in cards_remaining 
-                                      if c.getSuit() == suit and c.getValue() >= card.getValue())
-                    results.append(f"If play {card_name}: {beating_count/total*100 if total else 0:.1f}% chance of losing (SETS MUNDUP to {suit})")
+                if not has_original:
+                    # Setting trump: only higher cards of your suit beat you
+                    beating_count = sum(
+                        1 for c in cards_remaining
+                        if c.getSuit() == card.getSuit() and c.getValue() > card.getValue()
+                    )
+                    pct = beating_count / total * 100 if total else 0.0
+                    results.append(
+                        f"If play {card_name}: {pct:.1f}% chance of losing "
+                        f"(SETS TRUMP to {card.getSuit()})"
+                    )
                     continue
-                
-                # Sub-case: Playing original suite
-                if card.getSuit() == original_suite:
-                    beating_count = sum(1 for c in cards_remaining 
-                                      if c.getSuit() == original_suite and c.getValue() >= card.getValue())
                 else:
-                    # Playing off-suit when you have original suite = illegal move
-                    results.append(f"If play {card_name}: ILLEGAL (Must follow suit)")
-                    continue
-            
+                    # Following suit, no trump: only higher same-suit beats you
+                    beating_count = sum(
+                        1 for c in cards_remaining
+                        if c.getSuit() == original_suite and c.getValue() > card.getValue()
+                    )
+
             probability = (beating_count / total * 100) if total else 0.0
             results.append(f"If play {card_name}: {probability:.1f}% chance of losing")
-        
+
         return "\n".join(results)
     
     def _beats_highest(self, card, highest, original_suite, mundup):
@@ -81,80 +106,9 @@ class Calculations:
             # No mundup: must be same suit and higher
             return card.getSuit() == highest.getSuit() and card.getValue() > highest.getValue()
     
-    def _is_setting_mundup(self, card, player_hand, original_suite, mundup):
-        """Check if playing this card would set the mundup."""
-        return (mundup is None and 
-                card.getSuit() != original_suite and
-                not self._has_suit(player_hand, original_suite))
-    
     def _has_suit(self, hand, suit):
         """Check if player has any cards of the given suit."""
         return any(card.getSuit() == suit for card in hand)
-    
-    def _count_beating_cards(self, played_card, original_suite, mundup, remaining_cards, is_setting_mundup):
-        """
-        Count how many cards in remaining_cards can beat the played_card.
-        
-        Logic by scenario:
-        
-        1. SETTING MUNDUP (first to break suit):
-           - Your card becomes mundup
-           - Only cards of same suit >= your value can beat you
-        
-        2. Playing MUNDUP (when mundup already exists):
-           - Only mundup cards >= your value can beat you
-        
-        3. Playing ORIGINAL SUITE:
-           - Original suite cards >= your value can beat you
-           - Any mundup card can beat you (if opponent has no original suite)
-        
-        4. Playing OFF-SUIT (not original, not mundup):
-           - Any mundup card beats you
-           - Original suite cards can beat you if they're following suit
-        """
-        count = 0
-        played_value = played_card.getValue()
-        played_suit = played_card.getSuit()
-        
-        # CASE 1: You are SETTING the mundup
-        if is_setting_mundup:
-            # Your card's suit becomes mundup
-            # Only cards of your suit >= your value can beat you
-            for card in remaining_cards:
-                if card.getSuit() == played_suit and card.getValue() >= played_value:
-                    count += 1
-            return count
-        
-        # CASE 2: You play MUNDUP card (mundup already exists)
-        if played_suit == mundup:
-            # Only higher mundup cards can beat you
-            for card in remaining_cards:
-                if card.getSuit() == mundup and card.getValue() >= played_value:
-                    count += 1
-            return count
-        
-        # CASE 3: You play ORIGINAL SUITE
-        if played_suit == original_suite:
-            for card in remaining_cards:
-                # Original suite cards >= your value beat you
-                if card.getSuit() == original_suite and card.getValue() >= played_value:
-                    count += 1
-                # Any mundup card beats you
-                elif mundup and card.getSuit() == mundup:
-                    count += 1
-            return count
-        
-        # CASE 4: You play OFF-SUIT (not original, not mundup)
-        # This happens when you don't have original suite AND mundup exists
-        for card in remaining_cards:
-            # Any mundup card beats you
-            if mundup and card.getSuit() == mundup:
-                count += 1
-            # Original suite cards beat you
-            elif card.getSuit() == original_suite:
-                count += 1
-        
-        return count
     
     # ------------------------------------------------------------------
     # Best-move selection
@@ -199,11 +153,20 @@ class Calculations:
         return min(beating, key=lambda c: c.getValue())
 
     def _legal_cards(self, original_suite, mundup, player_hand):
-        """Return the subset of player_hand that is legal to play."""
+        """
+        Return the subset of player_hand that is legal to play.
+
+        Rules (in priority order):
+          1. Must follow the led suit if held.
+          2. Must play trump if can't follow suit but hold trump.
+          3. Otherwise any card is legal.
+        """
         if not original_suite:
             return list(player_hand)
         if self._has_suit(player_hand, original_suite):
             return [c for c in player_hand if c.getSuit() == original_suite]
+        if mundup and self._has_suit(player_hand, mundup):
+            return [c for c in player_hand if c.getSuit() == mundup]
         return list(player_hand)
 
     def _best_lead(self, hand, cards_remaining, mundup):
